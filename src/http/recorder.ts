@@ -76,6 +76,19 @@ const responseFromSnapshot = (request: HttpClientRequest.HttpClientRequest, snap
     ),
   )
 
+const MULTIPART_BOUNDARY = "effect-http-recorder-boundary"
+
+// Multipart boundaries are random per request, so replace them with a stable value before matching.
+const normalizeMultipart = (headers: Record<string, string>, body: string) => {
+  const contentType = headers["content-type"]
+  const boundary = contentType?.match(/^multipart\/[^;]+;(?:.*;)?\s*boundary="?([^";]+)"?/i)?.[1]
+  if (contentType === undefined || boundary === undefined) return { headers, body }
+  return {
+    headers: { ...headers, "content-type": contentType.replace(boundary, MULTIPART_BOUNDARY) },
+    body: body.replaceAll(`--${boundary}`, `--${MULTIPART_BOUNDARY}`),
+  }
+}
+
 export const redactedErrorRequest = (
   request: HttpClientRequest.HttpClientRequest,
   redactedUrl = redactUrl(request.url),
@@ -109,8 +122,7 @@ export const recordingLayer = (
           return redactor.request({
             method: web.method,
             url: web.url,
-            headers: Object.fromEntries(web.headers.entries()),
-            body: yield* Effect.promise(() => web.text()),
+            ...normalizeMultipart(Object.fromEntries(web.headers.entries()), yield* Effect.promise(() => web.text())),
           })
         })
 

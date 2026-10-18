@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Exit } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { existsSync } from "node:fs"
 import { isHttpInteraction } from "../src/cassette/model"
 import { HttpRecorder } from "../src"
@@ -292,6 +292,31 @@ describe("HTTP", () => {
         )
 
         expect(response.status).toBe(204)
+      })
+    })
+
+    test("replays multipart requests recorded with a different boundary", async () => {
+      using directory = tempDirectory("http-recorder-multipart-")
+      using server = Bun.serve({
+        port: 0,
+        fetch: () => new Response('{"id":"file_1"}', { headers: { "content-type": "application/json" } }),
+      })
+      const url = `http://127.0.0.1:${server.port}/files`
+      await withEnvironment("CI", undefined, async () => {
+        const program = Effect.gen(function* () {
+          const form = new FormData()
+          form.append("purpose", "assistants")
+          form.append("file", new Blob(["hello"], { type: "text/plain" }), "hello.txt")
+          const http = yield* HttpClient.HttpClient
+          const response = yield* http.execute(HttpClientRequest.post(url, { body: HttpBody.formData(form) }))
+          return yield* response.text
+        })
+        const record = await runWith("multipart", { directory: directory.path }, program)
+        await server.stop()
+        const replay = await runWith("multipart", { directory: directory.path }, program)
+
+        expect(record).toBe('{"id":"file_1"}')
+        expect(replay).toBe('{"id":"file_1"}')
       })
     })
 
